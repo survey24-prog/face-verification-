@@ -185,6 +185,11 @@
       background: linear-gradient(90deg, #4a90e2, #357ae8);
       transition: width 0.3s ease;
     }
+
+    .arrow {
+      font-size: 24px;
+      margin: 0 5px;
+    }
   </style>
 </head>
 <body>
@@ -227,15 +232,17 @@
 
     let stream = null;
     let verificationSteps = [
-      { action: "center", text: "Look straight ahead", completed: false },
-      { action: "left", text: "Turn your head LEFT", completed: false },
-      { action: "right", text: "Turn your head RIGHT", completed: false },
-      { action: "up", text: "Nod your head UP", completed: false },
-      { action: "down", text: "Nod your head DOWN", completed: false }
+      { action: "center", text: "Look straight ahead", completed: false, icon: "👀" },
+      { action: "left", text: "Turn head LEFT ←", completed: false, icon: "←" },
+      { action: "right", text: "Turn head RIGHT →", completed: false, icon: "→" },
+      { action: "up", text: "Nod UP ↑", completed: false, icon: "↑" },
+      { action: "down", text: "Nod DOWN ↓", completed: false, icon: "↓" }
     ];
     let currentStep = 0;
     let verificationComplete = false;
     let directionHistory = [];
+    let baseNosePosition = null;
+    let detectionCount = 0;
 
     // Initialize camera access
     async function initCamera() {
@@ -292,7 +299,8 @@
 
     function updateInstructions() {
       if (currentStep < verificationSteps.length) {
-        instructionsEl.textContent = verificationSteps[currentStep].text;
+        const step = verificationSteps[currentStep];
+        instructionsEl.innerHTML = `${step.text} <span class="arrow">${step.icon}</span>`;
         progressBar.style.width = `${(currentStep / verificationSteps.length) * 100}%`;
       }
     }
@@ -303,25 +311,37 @@
       const leftEye = landmarks.getLeftEye();
       const rightEye = landmarks.getRightEye();
 
-      // Calculate face center
-      const faceCenterX = (leftEye[0].x + rightEye[3].x) / 2;
-      const faceCenterY = (nose[0].y + jaw[8].y) / 2;
+      // On first detection, establish baseline positions
+      if (detectionCount === 0) {
+        baseNosePosition = {
+          x: nose[3].x,
+          y: nose[3].y,
+          faceWidth: Math.abs(leftEye[0].x - rightEye[3].x),
+          faceHeight: Math.abs(nose[0].y - jaw[8].y)
+        };
+      }
+      detectionCount++;
 
-      // Calculate nose position relative to face center
-      const noseX = nose[3].x;
-      const noseY = nose[3].y;
+      // Calculate relative movement from baseline
+      const xMovement = nose[3].x - baseNosePosition.x;
+      const yMovement = nose[3].y - baseNosePosition.y;
 
-      // Calculate direction thresholds
-      const xThreshold = 15;
-      const yThreshold = 10;
+      // Normalize movements by face size
+      const xRatio = Math.abs(xMovement) / baseNosePosition.faceWidth;
+      const yRatio = Math.abs(yMovement) / baseNosePosition.faceHeight;
 
-      // Check horizontal movement
-      if (noseX < faceCenterX - xThreshold) return "right";
-      if (noseX > faceCenterX + xThreshold) return "left";
+      // Thresholds for movement detection (20% of face size)
+      const threshold = 0.2;
 
-      // Check vertical movement
-      if (noseY < faceCenterY - yThreshold) return "up";
-      if (noseY > faceCenterY + yThreshold) return "down";
+      // Check horizontal movement (left/right)
+      if (xRatio > threshold) {
+        return xMovement < 0 ? "left" : "right";
+      }
+      
+      // Check vertical movement (up/down)
+      if (yRatio > threshold) {
+        return yMovement < 0 ? "up" : "down";
+      }
 
       return "center";
     }
@@ -329,16 +349,17 @@
     function checkDirectionMatch(direction) {
       const requiredDirection = verificationSteps[currentStep].action;
       
-      // Add current direction to history (last 5 frames)
+      // Add current direction to history (last 10 frames)
       directionHistory.push(direction);
-      if (directionHistory.length > 5) {
+      if (directionHistory.length > 10) {
         directionHistory.shift();
       }
       
       // Check if the required direction appears consistently in history
       const directionCount = directionHistory.filter(d => d === requiredDirection).length;
       
-      return directionCount >= 3; // Need at least 3 frames with correct direction
+      // Need at least 5 frames with correct direction (50% of history)
+      return directionCount >= 5;
     }
 
     async function detect() {
@@ -353,6 +374,7 @@
           if (checkDirectionMatch(currentDirection)) {
             verificationSteps[currentStep].completed = true;
             directionHistory = []; // Reset history for next step
+            detectionCount = 0; // Reset for new baseline
             
             // Move to next step
             currentStep++;
@@ -398,6 +420,8 @@
     // Close modal when button is clicked
     modalBtn.addEventListener("click", () => {
       successModal.classList.remove('active');
+      // Refresh the page to start over
+      window.location.reload();
     });
 
     // Clean up when page is closed

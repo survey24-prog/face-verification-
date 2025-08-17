@@ -96,6 +96,7 @@
       font-weight: bold;
       color: #4a90e2;
       margin-top: 10px;
+      height: 30px;
     }
 
     .error {
@@ -117,7 +118,6 @@
     <button id="startBtn">Start Verification</button>
   </div>
 
-  <script defer src="https://cdn.jsdelivr.net/npm/face-api.js"></script>
   <script>
     const video = document.getElementById("video");
     const startBtn = document.getElementById("startBtn");
@@ -185,8 +185,20 @@
         stream.getTracks().forEach(track => track.stop());
       }
       
-      // Redirect to success page
-      window.location.href = "verification-success.html";
+      // Create and submit a form to pass data to success page
+      const form = document.createElement('form');
+      form.method = 'GET';
+      form.action = 'verification-success.html';
+      
+      // Add a timestamp parameter
+      const timestampInput = document.createElement('input');
+      timestampInput.type = 'hidden';
+      timestampInput.name = 't';
+      timestampInput.value = Date.now();
+      form.appendChild(timestampInput);
+      
+      document.body.appendChild(form);
+      form.submit();
     }
 
     function hasGetUserMedia() {

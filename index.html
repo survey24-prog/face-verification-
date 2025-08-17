@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Face Verification</title>
+  <style>
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      background: #f9f9f9;
+      font-family: Arial, sans-serif;
+    }
+
+    .container {
+      text-align: center;
+    }
+
+    .phone {
+      position: relative;
+      width: 300px;
+      height: 600px;
+      border: 12px solid black;
+      border-radius: 40px;
+      background: black;
+      overflow: hidden;
+      box-shadow: 0 8px 20px rgba(0,0,0,0.2);
+      margin: 0 auto;
+    }
+
+    video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .scanner {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 220px;
+      height: 280px;
+      border: 2px dashed #3376ff;
+      border-radius: 50% / 55%;
+      transform: translate(-50%, -50%);
+      animation: scan 2s infinite linear;
+    }
+
+    @keyframes scan {
+      0% { opacity: 0.3; }
+      50% { opacity: 1; }
+      100% { opacity: 0.3; }
+    }
+
+    .status {
+      margin-top: 20px;
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      background: #fff;
+      border-radius: 12px;
+      padding: 10px 20px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+      opacity: 0;
+      transition: opacity 0.5s ease-in-out;
+    }
+
+    .status-icon {
+      width: 24px;
+      height: 24px;
+      background: #2ecc71;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      font-weight: bold;
+    }
+
+    .instructions {
+      margin-top: 15px;
+      font-size: 16px;
+      font-weight: bold;
+      color: #333;
+    }
+
+    /* Custom Start Button */
+    #startBtn {
+      margin-top: 20px;
+      padding: 12px 28px;
+      font-size: 16px;
+      font-weight: bold;
+      color: #fff;
+      background: linear-gradient(135deg, #4a90e2, #357ae8);
+      border: none;
+      border-radius: 30px;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+    }
+
+    #startBtn:hover {
+      background: linear-gradient(135deg, #357ae8, #2a65d0);
+      transform: scale(1.05);
+    }
+
+    #startBtn:active {
+      transform: scale(0.95);
+    }
+
+    .error {
+      color: #e74c3c;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="phone">
+      <video id="video" autoplay playsinline muted></video>
+      <div class="scanner"></div>
+    </div>
+
+    <div class="instructions" id="instructions">Click Start Verification to begin</div>
+
+    <div class="status" id="status">
+      <div class="status-icon">✔</div>
+      <span>Liveness Verified</span>
+    </div>
+
+    <!-- Centered Start Button -->
+    <button id="startBtn">Start Verification</button>
+  </div>
+
+  <!-- Face API.js -->
+  <script defer src="https://cdn.jsdelivr.net/npm/face-api.js"></script>
+  <script>
+    const video = document.getElementById("video");
+    const startBtn = document.getElementById("startBtn");
+    const statusEl = document.getElementById("status");
+    const instructionsEl = document.getElementById("instructions");
+
+    let stage = 0; // 0 = center, 1 = left, 2 = right
+    let verified = false;
+    let stream = null;
+
+    // Check if browser supports mediaDevices API
+    function hasGetUserMedia() {
+      return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+    }
+
+    // Initialize camera access
+    async function initCamera() {
+      if (!hasGetUserMedia()) {
+        showError("Your browser doesn't support camera access");
+        return;
+      }
+
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ 
+          video: { 
+            facingMode: 'user',
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          } 
+        });
+        video.srcObject = stream;
+        startBtn.style.display = 'none';
+        instructionsEl.textContent = "Loading face detection models...";
+        await loadModels();
+        instructionsEl.textContent = "Look straight ahead...";
+      } catch (err) {
+        console.error("Camera error:", err);
+        if (err.name === 'NotAllowedError') {
+          showError("Camera access was denied. Please allow camera permissions and refresh the page.");
+        } else if (err.name === 'NotFoundError') {
+          showError("No camera found. Please connect a camera and try again.");
+        } else {
+          showError("Error accessing camera: " + err.message);
+        }
+        startBtn.textContent = "Try Again";
+      }
+    }
+
+    function showError(message) {
+      instructionsEl.textContent = message;
+      instructionsEl.classList.add('error');
+    }
+
+    async function loadModels() {
+      try {
+        await faceapi.nets.tinyFaceDetector.loadFromUri("https://cdn.jsdelivr.net/npm/face-api.js/weights");
+        await faceapi.nets.faceLandmark68TinyNet.loadFromUri("https://cdn.jsdelivr.net/npm/face-api.js/weights");
+      } catch (err) {
+        showError("Error loading face detection models. Please try again later.");
+        console.error("Model loading error:", err);
+      }
+    }
+
+    function getHeadDirection(landmarks) {
+      const nose = landmarks.getNose();
+      const leftEye = landmarks.getLeftEye();
+      const rightEye = landmarks.getRightEye();
+
+      const noseX = nose[3].x;
+      const leftX = leftEye[0].x;
+      const rightX = rightEye[3].x;
+
+      const faceCenter = (leftX + rightX) / 2;
+
+      if (noseX < faceCenter - 15) return "right";  // user turned left
+      if (noseX > faceCenter + 15) return "left";   // user turned right
+      return "center";
+    }
+
+    async function detect() {
+      if (!video.srcObject) return;
+
+      try {
+        const detection = await faceapi.detectSingleFace(video, new faceapi.TinyFaceDetectorOptions()).withFaceLandmarks(true);
+
+        if (detection && !verified) {
+          const dir = getHeadDirection(detection.landmarks);
+
+          if (stage === 0 && dir === "center") {
+            instructionsEl.textContent = "Now turn your head LEFT";
+            stage = 1;
+          } else if (stage === 1 && dir === "left") {
+            instructionsEl.textContent = "Now turn your head RIGHT";
+            stage = 2;
+          } else if (stage === 2 && dir === "right") {
+            instructionsEl.textContent = "✅ Liveness Verified";
+            statusEl.style.opacity = 1;
+            instructionsEl.style.display = "none";
+            verified = true;
+            
+            // Stop camera stream when done
+            if (stream) {
+              stream.getTracks().forEach(track => track.stop());
+            }
+          }
+        }
+      } catch (err) {
+        console.error("Detection error:", err);
+      }
+
+      requestAnimationFrame(detect);
+    }
+
+    // Initialize when Start button is clicked
+    startBtn.addEventListener("click", initCamera);
+
+    // Clean up when page is closed
+    window.addEventListener('beforeunload', () => {
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+      }
+    });
+  </script>
+</body>
+</html>
